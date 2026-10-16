@@ -1,0 +1,16 @@
+node_modules/
+test-results/
+.candidate/
+.source/
+.env*
+.browser-cache/
+qa9-baseline/
+
+source-private/
+.source-transfer.json
+.connection-write-check.txt
+.tools/
+
+public-qa/
+review-packages/
+private-source-changes.patch
