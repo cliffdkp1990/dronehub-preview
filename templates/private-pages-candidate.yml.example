@@ -1,0 +1,77 @@
+name: Lovable Pages candidate
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: lovable-pages-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    name: Source / tests, static build and iPhone emulation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.3'
+      - run: bun install --frozen-lockfile
+      - run: bun run test:ci
+      - run: bun run typecheck
+      - run: bun run build:pages
+      - run: node ci/pages/scripts/verify-bundle.mjs pages-dist
+      - run: npm ci --ignore-scripts
+        working-directory: ci/pages
+      - run: npm test
+        working-directory: ci/pages
+      - run: npx --no-install playwright install --with-deps chromium webkit
+        working-directory: ci/pages
+      - run: npm run test:browser
+        working-directory: ci/pages
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: private-pages-test-evidence
+          path: ci/pages/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tested-static-output
+          path: pages-dist/
+          retention-days: 3
+          if-no-files-found: error
+          include-hidden-files: true
+  propose:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.PAGES_CANDIDATES_ENABLED == 'true' && vars.PAGES_QA9_PARITY_APPROVED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      # Fresh runner: checkout reviewed pipeline tools only, never src or build scripts.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /ci/pages/scripts/
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: tested-static-output
+          path: .candidate
+      - run: node ci/pages/scripts/publish-candidate.mjs .candidate
+        env:
+          PAGES_PUBLISH_TOKEN: ${{ secrets.PAGES_PUBLISH_TOKEN }}
